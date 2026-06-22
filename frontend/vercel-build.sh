@@ -4,11 +4,12 @@
 # Required Vercel project env vars: API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY.
 set -euo pipefail
 
-FLUTTER_VERSION="3.27.1"
 FLUTTER_DIR="$HOME/flutter"
 
+# pubspec.yaml requires Dart SDK ^3.11.5, which needs a recent Flutter stable
+# release — track the stable channel HEAD rather than pinning an old tag.
 if [ ! -d "$FLUTTER_DIR" ]; then
-  git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_DIR"
+  git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$FLUTTER_DIR"
 fi
 export PATH="$FLUTTER_DIR/bin:$PATH"
 
