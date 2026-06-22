@@ -131,7 +131,8 @@ class ApiClient {
     return _decode(response);
   }
 
-  static const _timeout = Duration(seconds: 12);
+  // 45s to absorb Render free-tier cold starts (spun-down instance can take 30-60s to wake).
+  static const _timeout = Duration(seconds: 45);
 
   Future<http.Response> _dispatch(
     String method,
