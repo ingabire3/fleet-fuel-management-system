@@ -1,0 +1,1275 @@
+openapi: 3.0.3
+info:
+  title: Fleet Fuel Management System API
+  version: "1.0.0"
+  description: |
+    Fleet Fuel Management System backend.
+
+    Auth flow: POST /api/auth/login -> if `requiresOtp: true`, read the OTP code
+    from server logs (SMTP disabled in dev) and POST /api/auth/login/verify-otp
+    -> use `tokens.accessToken` via the **Authorize** button (Bearer) above to
+    call protected endpoints.
+servers:
+  - url: https://fuel-fleet-backend.onrender.com
+    description: Production (Render)
+  - url: http://localhost:4000
+    description: Local development
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Auth
+  - name: Users
+  - name: Departments
+  - name: Vehicles
+  - name: Fuel Prices
+  - name: Settings
+  - name: Allocations
+  - name: Fuel Transactions
+  - name: Fuel Requests
+  - name: GPS
+  - name: Approved Routes
+  - name: Alerts
+  - name: Analytics
+  - name: Notifications
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  # ===================== AUTH =====================
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register (driver self-signup, pending approval)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login (email + password, optional OTP)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: OK (tokens if no OTP required, otherwise transientToken)
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/DataObject" } }
+
+  /api/auth/login/verify-otp:
+    post:
+      tags: [Auth]
+      summary: Verify login OTP and obtain tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyOtpRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token, obtain new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (revokes the given refresh token)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LogoutRequest" }
+      responses:
+        "204": { description: No Content }
+
+  /api/auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoke all sessions for current user
+      responses:
+        "204": { description: No Content }
+
+  /api/auth/password-reset/request:
+    post:
+      tags: [Auth]
+      summary: Request password reset OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetRequestRequest" }
+      responses:
+        "204": { description: No Content }
+
+  /api/auth/password-reset/verify:
+    post:
+      tags: [Auth]
+      summary: Verify password reset OTP, obtain reset token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetVerifyRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/auth/password-reset/confirm:
+    post:
+      tags: [Auth]
+      summary: Confirm password reset (revokes all sessions)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetConfirmRequest" }
+      responses:
+        "204": { description: No Content }
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current authenticated user
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/auth/sessions:
+    get:
+      tags: [Auth]
+      summary: List active sessions for current user
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/auth/sessions/{id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a session
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "204": { description: No Content }
+
+  # ===================== USERS =====================
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List users (SA/FM/FO)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: role
+          schema: { type: string, enum: [SUPER_ADMIN, FLEET_MANAGER, FINANCE_OFFICER, DRIVER] }
+        - in: query
+          name: departmentId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: isApproved
+          schema: { type: boolean }
+        - in: query
+          name: isActive
+          schema: { type: boolean }
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Users]
+      summary: Create user (SA/FM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user by id (self or staff)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    patch:
+      tags: [Users]
+      summary: Update user (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    delete:
+      tags: [Users]
+      summary: Soft-delete user (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "204": { description: No Content }
+
+  /api/users/{id}/stipend-history:
+    get:
+      tags: [Users]
+      summary: Stipend change history for a user
+      parameters:
+        - { $ref: "#/components/parameters/IdParam" }
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/users/{id}/approve:
+    patch:
+      tags: [Users]
+      summary: Approve a pending driver registration (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/users/{id}/location:
+    patch:
+      tags: [Users]
+      summary: Update home/work location (self or SA/FM, triggers allocation recompute)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLocationRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/users/{id}/stipend:
+    patch:
+      tags: [Users]
+      summary: Update monthly stipend/budget (SA/FM/FO, writes StipendHistory, triggers recompute)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateStipendRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== DEPARTMENTS =====================
+  /api/departments:
+    get:
+      tags: [Departments]
+      summary: List departments
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Departments]
+      summary: Create department (SA/FM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDepartmentRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/departments/{id}:
+    get:
+      tags: [Departments]
+      summary: Get department by id
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    patch:
+      tags: [Departments]
+      summary: Update department (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDepartmentRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    delete:
+      tags: [Departments]
+      summary: Delete department (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "204": { description: No Content }
+
+  # ===================== VEHICLES =====================
+  /api/vehicles:
+    get:
+      tags: [Vehicles]
+      summary: List vehicles (SA/FM/FO)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: status
+          schema: { type: string, enum: [ACTIVE, MAINTENANCE, RETIRED, UNASSIGNED] }
+        - in: query
+          name: fuelType
+          schema: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: unassigned
+          schema: { type: boolean }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Vehicles]
+      summary: Create vehicle (SA/FM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVehicleRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/vehicles/me:
+    get:
+      tags: [Vehicles]
+      summary: Get vehicle assigned to current driver
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/vehicles/{id}:
+    get:
+      tags: [Vehicles]
+      summary: Get vehicle by id
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    patch:
+      tags: [Vehicles]
+      summary: Update vehicle (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateVehicleRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    delete:
+      tags: [Vehicles]
+      summary: Soft-delete vehicle (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "204": { description: No Content }
+
+  /api/vehicles/{id}/assign-driver:
+    patch:
+      tags: [Vehicles]
+      summary: Assign or unassign a driver (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignDriverRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== FUEL PRICES =====================
+  /api/fuel-prices:
+    get:
+      tags: [Fuel Prices]
+      summary: List fuel prices
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: fuelType
+          schema: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Fuel Prices]
+      summary: Create fuel price (SA/FM/FO, triggers recompute for affected drivers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateFuelPriceRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== SETTINGS =====================
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: List system settings (SA/FM)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/settings/{key}:
+    put:
+      tags: [Settings]
+      summary: Update a system setting (SA/FM)
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+            enum: [FUEL_BUFFER_PERCENT, DEFAULT_WORKING_DAYS, ROAD_DISTANCE_FACTOR, REQUIRE_LOGIN_OTP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSettingRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== ALLOCATIONS =====================
+  /api/allocations/me/current:
+    get:
+      tags: [Allocations]
+      summary: Current driver's latest fuel allocation
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/allocations/{driverId}/current:
+    get:
+      tags: [Allocations]
+      summary: Latest fuel allocation for a driver (self or SA/FM/FO)
+      parameters: [{ $ref: "#/components/parameters/DriverIdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/allocations/{driverId}/history:
+    get:
+      tags: [Allocations]
+      summary: Fuel allocation history for a driver (self or SA/FM/FO)
+      parameters:
+        - { $ref: "#/components/parameters/DriverIdParam" }
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/allocations/{driverId}/recompute:
+    post:
+      tags: [Allocations]
+      summary: Force-recompute a driver's fuel allocation (SA/FM/FO)
+      parameters: [{ $ref: "#/components/parameters/DriverIdParam" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecomputeAllocationRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== FUEL TRANSACTIONS =====================
+  /api/fuel-transactions:
+    get:
+      tags: [Fuel Transactions]
+      summary: List fuel transactions (own or staff)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: vehicleId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: driverId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: transactionType
+          schema: { type: string, enum: [REFILL, USAGE, ADJUSTMENT] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Fuel Transactions]
+      summary: Record a fuel transaction (SA/FM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTransactionRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/fuel-transactions/{id}:
+    get:
+      tags: [Fuel Transactions]
+      summary: Get fuel transaction by id
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== FUEL REQUESTS =====================
+  /api/fuel-requests:
+    get:
+      tags: [Fuel Requests]
+      summary: List extra fuel requests (own or staff)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [PENDING, FLEET_MANAGER_APPROVED, FLEET_MANAGER_REJECTED, FINANCE_APPROVED, FINANCE_REJECTED, CANCELLED]
+        - in: query
+          name: driverId
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Fuel Requests]
+      summary: Submit an extra fuel request (DRIVER)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateFuelRequestRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/fuel-requests/{id}:
+    get:
+      tags: [Fuel Requests]
+      summary: Get fuel request by id
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/fuel-requests/{id}/fleet-manager-decision:
+    patch:
+      tags: [Fuel Requests]
+      summary: Stage 1 decision (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecisionRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/fuel-requests/{id}/finance-decision:
+    patch:
+      tags: [Fuel Requests]
+      summary: Stage 2 decision (SA/FO) - approval triggers allocation recompute
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecisionRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/fuel-requests/{id}/cancel:
+    patch:
+      tags: [Fuel Requests]
+      summary: Cancel own pending/FM-approved request (owning DRIVER)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== GPS =====================
+  /api/gps/live-positions:
+    get:
+      tags: [GPS]
+      summary: Live positions of all drivers (SA/FM/FO)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/gps:
+    get:
+      tags: [GPS]
+      summary: List GPS trips (own or staff)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: driverId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: vehicleId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema: { type: string, enum: [PLANNED, IN_PROGRESS, COMPLETED, CANCELLED] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [GPS]
+      summary: Start a trip (DRIVER)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartTripRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/gps/{id}:
+    get:
+      tags: [GPS]
+      summary: Get GPS trip by id (own or staff)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/gps/{id}/waypoints:
+    post:
+      tags: [GPS]
+      summary: Add a waypoint to a trip (DRIVER)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddWaypointRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/gps/{id}/end:
+    patch:
+      tags: [GPS]
+      summary: End a trip (DRIVER)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EndTripRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/gps/{id}/cancel:
+    patch:
+      tags: [GPS]
+      summary: Cancel a trip (DRIVER)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== APPROVED ROUTES =====================
+  /api/approved-routes:
+    get:
+      tags: [Approved Routes]
+      summary: List approved routes (own or staff)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: driverId
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+    post:
+      tags: [Approved Routes]
+      summary: Create approved route (SA/FM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateApprovedRouteRequest" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/approved-routes/{id}:
+    get:
+      tags: [Approved Routes]
+      summary: Get approved route by id (own or staff)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    patch:
+      tags: [Approved Routes]
+      summary: Update approved route (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateApprovedRouteRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+    delete:
+      tags: [Approved Routes]
+      summary: Delete approved route (SA/FM)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "204": { description: No Content }
+
+  /api/approved-routes/{id}/comparison/{tripId}:
+    get:
+      tags: [Approved Routes]
+      summary: Compare a GPS trip against an approved route (detour detection)
+      parameters:
+        - { $ref: "#/components/parameters/IdParam" }
+        - in: path
+          name: tripId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== ALERTS =====================
+  /api/alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts (own or org)
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: status
+          schema: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED, DISMISSED] }
+        - in: query
+          name: alertType
+          schema:
+            type: string
+            enum: [POSSIBLE_THEFT, LOW_FUEL, RAPID_FUEL_DROP, UNUSUAL_ROUTE, OVER_CONSUMPTION, ROUTE_DETOUR, BUDGET_EXCEEDED, STIPEND_CHANGED]
+        - in: query
+          name: severity
+          schema: { type: string, enum: [CRITICAL, HIGH, MEDIUM, LOW] }
+        - in: query
+          name: driverId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: vehicleId
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/alerts/{id}:
+    get:
+      tags: [Alerts]
+      summary: Get alert by id
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/alerts/{id}/status:
+    patch:
+      tags: [Alerts]
+      summary: Update alert status (SA/FM/FO; FO limited to BUDGET_EXCEEDED)
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAlertStatusRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== ANALYTICS =====================
+  /api/analytics/drivers/me/summary:
+    get:
+      tags: [Analytics]
+      summary: Current driver's analytics summary
+      parameters:
+        - { $ref: "#/components/parameters/YearParam" }
+        - { $ref: "#/components/parameters/MonthParam" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/analytics/drivers/{id}/summary:
+    get:
+      tags: [Analytics]
+      summary: Driver analytics summary (own or staff)
+      parameters:
+        - { $ref: "#/components/parameters/IdParam" }
+        - { $ref: "#/components/parameters/YearParam" }
+        - { $ref: "#/components/parameters/MonthParam" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/analytics/fleet/summary:
+    get:
+      tags: [Analytics]
+      summary: Fleet-wide analytics summary (SA/FM/FO)
+      parameters:
+        - { $ref: "#/components/parameters/YearParam" }
+        - { $ref: "#/components/parameters/MonthParam" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  # ===================== NOTIFICATIONS =====================
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications for current user
+      parameters:
+        - { $ref: "#/components/parameters/PageParam" }
+        - { $ref: "#/components/parameters/PageSizeParam" }
+        - in: query
+          name: isRead
+          schema: { type: boolean }
+        - in: query
+          name: category
+          schema: { type: string, enum: [FUEL_REQUEST, AI_ALERT, VEHICLE, STIPEND, BUDGET, ACCOUNT, SECURITY, SYSTEM] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataArray" } } } }
+
+  /api/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      responses:
+        "204": { description: No Content }
+
+  /api/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      parameters: [{ $ref: "#/components/parameters/IdParam" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/notifications/devices:
+    post:
+      tags: [Notifications]
+      summary: Register a push notification device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterDeviceTokenRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataObject" } } } }
+
+  /api/notifications/devices/{deviceId}:
+    delete:
+      tags: [Notifications]
+      summary: Unregister a device token
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: No Content }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdParam:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+    DriverIdParam:
+      in: path
+      name: driverId
+      required: true
+      schema: { type: string, format: uuid }
+    PageParam:
+      in: query
+      name: page
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSizeParam:
+      in: query
+      name: pageSize
+      schema: { type: integer, minimum: 1, default: 20 }
+    YearParam:
+      in: query
+      name: year
+      schema: { type: integer, minimum: 2000, maximum: 2100 }
+    MonthParam:
+      in: query
+      name: month
+      schema: { type: integer, minimum: 1, maximum: 12 }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      description: Shape returned for all 4xx/5xx responses.
+      properties:
+        error:
+          type: object
+          properties:
+            message: { type: string, example: "Validation failed" }
+            details: { type: object, additionalProperties: true, description: "present on 400 validation errors (zod fieldErrors/formErrors)" }
+    DataObject:
+      type: object
+      properties:
+        data: { type: object, additionalProperties: true }
+    DataArray:
+      type: object
+      properties:
+        data: { type: array, items: { type: object, additionalProperties: true } }
+        meta: { $ref: "#/components/schemas/PaginationMeta" }
+    PaginationMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+
+    DeviceContext:
+      type: object
+      properties:
+        deviceId: { type: string, example: browser-test }
+        deviceType: { type: string, enum: [ANDROID, IOS, WEB, UNKNOWN], example: WEB }
+        deviceName: { type: string, example: Chrome on Windows }
+
+    RegisterRequest:
+      allOf:
+        - type: object
+          required: [email, password, fullName]
+          properties:
+            email: { type: string, format: email }
+            password: { type: string, minLength: 8, maxLength: 72 }
+            fullName: { type: string }
+            phone: { type: string }
+            employeeId: { type: string }
+            departmentId: { type: string, format: uuid }
+            homeAddress: { type: string }
+            homeLat: { type: number }
+            homeLng: { type: number }
+            workSiteName: { type: string }
+            workSiteLat: { type: number }
+            workSiteLng: { type: number }
+            fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+
+    LoginRequest:
+      allOf:
+        - $ref: "#/components/schemas/DeviceContext"
+        - type: object
+          required: [email, password]
+          properties:
+            email: { type: string, format: email, example: driver@fleet.rw }
+            password: { type: string, example: "Passw0rd!" }
+
+    VerifyOtpRequest:
+      allOf:
+        - $ref: "#/components/schemas/DeviceContext"
+        - type: object
+          required: [transientToken, code]
+          properties:
+            transientToken: { type: string }
+            code: { type: string, minLength: 6, maxLength: 6 }
+
+    RefreshRequest:
+      allOf:
+        - $ref: "#/components/schemas/DeviceContext"
+        - type: object
+          required: [refreshToken]
+          properties:
+            refreshToken: { type: string }
+
+    LogoutRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    PasswordResetRequestRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    PasswordResetVerifyRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string, format: email }
+        code: { type: string, minLength: 6, maxLength: 6 }
+
+    PasswordResetConfirmRequest:
+      type: object
+      required: [resetToken, newPassword]
+      properties:
+        resetToken: { type: string }
+        newPassword: { type: string, minLength: 8, maxLength: 72 }
+
+    CreateUserRequest:
+      type: object
+      required: [email, password, fullName]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 72 }
+        fullName: { type: string }
+        role: { type: string, enum: [SUPER_ADMIN, FLEET_MANAGER, FINANCE_OFFICER, DRIVER], default: DRIVER }
+        phone: { type: string }
+        employeeId: { type: string }
+        departmentId: { type: string, format: uuid }
+        homeAddress: { type: string }
+        homeLat: { type: number }
+        homeLng: { type: number }
+        workSiteName: { type: string }
+        workSiteLat: { type: number }
+        workSiteLng: { type: number }
+        fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+        monthlyFuelStipendRwf: { type: number }
+        monthlyBudgetRwf: { type: number }
+        workingDaysPerMonth: { type: integer }
+        isApproved: { type: boolean }
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        fullName: { type: string }
+        phone: { type: string, nullable: true }
+        employeeId: { type: string, nullable: true }
+        departmentId: { type: string, format: uuid, nullable: true }
+        role: { type: string, enum: [SUPER_ADMIN, FLEET_MANAGER, FINANCE_OFFICER, DRIVER] }
+        fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID], nullable: true }
+        workingDaysPerMonth: { type: integer }
+        isActive: { type: boolean }
+
+    UpdateLocationRequest:
+      type: object
+      properties:
+        homeAddress: { type: string, nullable: true }
+        homeLat: { type: number, nullable: true }
+        homeLng: { type: number, nullable: true }
+        workSiteName: { type: string, nullable: true }
+        workSiteLat: { type: number, nullable: true }
+        workSiteLng: { type: number, nullable: true }
+
+    UpdateStipendRequest:
+      type: object
+      required: [monthlyFuelStipendRwf]
+      properties:
+        monthlyFuelStipendRwf: { type: number }
+        monthlyBudgetRwf: { type: number }
+        reason: { type: string }
+
+    CreateDepartmentRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    UpdateDepartmentRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    CreateVehicleRequest:
+      type: object
+      required: [plateNumber, make, model, year, vehicleType, fuelType, tankCapacityL]
+      properties:
+        plateNumber: { type: string, example: "RAD 123 A" }
+        make: { type: string }
+        model: { type: string }
+        year: { type: integer, minimum: 1980, maximum: 2100 }
+        vehicleType: { type: string, enum: [SEDAN, SUV, PICKUP, TRUCK, BUS, VAN, MOTORCYCLE, OTHER] }
+        fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+        tankCapacityL: { type: number }
+        currentFuelL: { type: number }
+        odometerKm: { type: number }
+        fuelEfficiencyKmpl: { type: number }
+        color: { type: string }
+        notes: { type: string }
+
+    UpdateVehicleRequest:
+      type: object
+      properties:
+        plateNumber: { type: string }
+        make: { type: string }
+        model: { type: string }
+        year: { type: integer }
+        vehicleType: { type: string, enum: [SEDAN, SUV, PICKUP, TRUCK, BUS, VAN, MOTORCYCLE, OTHER] }
+        fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+        tankCapacityL: { type: number }
+        currentFuelL: { type: number }
+        odometerKm: { type: number }
+        fuelEfficiencyKmpl: { type: number }
+        status: { type: string, enum: [ACTIVE, MAINTENANCE, RETIRED, UNASSIGNED] }
+        color: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+
+    AssignDriverRequest:
+      type: object
+      required: [driverId]
+      properties:
+        driverId: { type: string, format: uuid, nullable: true }
+
+    CreateFuelPriceRequest:
+      type: object
+      required: [fuelType, priceRwf, effectiveDate]
+      properties:
+        fuelType: { type: string, enum: [PETROL, DIESEL, ELECTRIC, HYBRID] }
+        priceRwf: { type: number, example: 1450 }
+        effectiveDate: { type: string, format: date }
+
+    UpdateSettingRequest:
+      type: object
+      required: [value]
+      properties:
+        value: { type: string, example: "20" }
+        description: { type: string }
+
+    RecomputeAllocationRequest:
+      type: object
+      properties:
+        reason: { type: string, example: manual_admin_trigger }
+
+    CreateTransactionRequest:
+      type: object
+      required: [vehicleId, transactionType, quantityL]
+      properties:
+        vehicleId: { type: string, format: uuid }
+        transactionType: { type: string, enum: [REFILL, USAGE, ADJUSTMENT] }
+        quantityL: { type: number }
+        unitPriceRwf: { type: number }
+        totalCostRwf: { type: number }
+        odometerKm: { type: number }
+        fuelLevelBeforeL: { type: number }
+        fuelLevelAfterL: { type: number }
+        receiptNumber: { type: string }
+        notes: { type: string }
+        recordedAt: { type: string, format: date-time }
+
+    CreateFuelRequestRequest:
+      type: object
+      required: [requestedQuantityL]
+      properties:
+        requestedQuantityL: { type: number, example: 20 }
+        purpose: { type: string, example: Site visit }
+        unitPriceRwf: { type: number }
+        originName: { type: string }
+        originLat: { type: number }
+        originLng: { type: number }
+        destinationName: { type: string }
+        destinationLat: { type: number }
+        destinationLng: { type: number }
+        expectedDistanceKm: { type: number }
+        estimatedFuelRequiredL: { type: number }
+        supportingNotes: { type: string }
+
+    DecisionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        comment: { type: string }
+        rejectionReason: { type: string, description: "required when approve = false" }
+        grantedQuantityL: { type: number, description: "finance stage only", example: 20 }
+
+    StartTripRequest:
+      type: object
+      properties:
+        originName: { type: string }
+        originLat: { type: number }
+        originLng: { type: number }
+        destinationName: { type: string }
+        destinationLat: { type: number }
+        destinationLng: { type: number }
+
+    AddWaypointRequest:
+      type: object
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        speedKmh: { type: number }
+        fuelLevelL: { type: number }
+        recordedAt: { type: string, format: date-time }
+
+    EndTripRequest:
+      type: object
+      properties:
+        distanceKm: { type: number }
+        fuelConsumedL: { type: number }
+
+    CreateApprovedRouteRequest:
+      type: object
+      required: [driverId, waypoints]
+      properties:
+        driverId: { type: string, format: uuid }
+        name: { type: string }
+        toleranceKm: { type: number }
+        waypoints:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [latitude, longitude]
+            properties:
+              latitude: { type: number, minimum: -90, maximum: 90 }
+              longitude: { type: number, minimum: -180, maximum: 180 }
+              label: { type: string }
+
+    UpdateApprovedRouteRequest:
+      type: object
+      properties:
+        name: { type: string }
+        toleranceKm: { type: number }
+        isActive: { type: boolean }
+        waypoints:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [latitude, longitude]
+            properties:
+              latitude: { type: number, minimum: -90, maximum: 90 }
+              longitude: { type: number, minimum: -180, maximum: 180 }
+              label: { type: string }
+
+    UpdateAlertStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ACKNOWLEDGED, RESOLVED, DISMISSED] }
+
+    RegisterDeviceTokenRequest:
+      type: object
+      required: [deviceId]
+      properties:
+        deviceId: { type: string }
+        token: { type: string, nullable: true }
+        deviceType: { type: string, enum: [ANDROID, IOS, WEB, UNKNOWN] }
+        deviceName: { type: string }

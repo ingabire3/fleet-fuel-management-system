@@ -1,0 +1,884 @@
+// Fleet Fuel Management System - Prisma schema
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  FLEET_MANAGER
+  FINANCE_OFFICER
+  DRIVER
+}
+
+enum VehicleType {
+  SEDAN
+  SUV
+  PICKUP
+  TRUCK
+  BUS
+  VAN
+  MOTORCYCLE
+  OTHER
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  ELECTRIC
+  HYBRID
+}
+
+enum VehicleStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+  UNASSIGNED
+}
+
+enum TransactionType {
+  REFILL
+  USAGE
+  ADJUSTMENT
+}
+
+enum FuelRequestStatus {
+  PENDING
+  FLEET_MANAGER_APPROVED
+  FLEET_MANAGER_REJECTED
+  FINANCE_APPROVED
+  FINANCE_REJECTED
+  CANCELLED
+}
+
+enum TripStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AlertType {
+  POSSIBLE_THEFT
+  LOW_FUEL
+  RAPID_FUEL_DROP
+  UNUSUAL_ROUTE
+  OVER_CONSUMPTION
+  ROUTE_DETOUR
+  BUDGET_EXCEEDED
+  STIPEND_CHANGED
+}
+
+enum AlertSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+enum NotificationCategory {
+  FUEL_REQUEST
+  AI_ALERT
+  VEHICLE
+  BUDGET
+  STIPEND
+  ACCOUNT
+  SECURITY
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum OtpPurpose {
+  LOGIN
+  PASSWORD_RESET
+  NEW_DEVICE
+  EMAIL_VERIFICATION
+}
+
+enum OtpStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  CONSUMED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  LOGIN
+  LOGOUT
+  PASSWORD_CHANGE
+  STIPEND_CHANGE
+  ROLE_CHANGE
+  PERMISSION_CHANGE
+  VEHICLE_ASSIGNMENT_CHANGE
+  ROUTE_CHANGE
+  CONFIG_CHANGE
+  OTHER
+}
+
+enum PermissionType {
+  VEHICLE_MANAGEMENT
+  FINANCIAL_MANAGEMENT
+  DRIVER_MANAGEMENT
+}
+
+enum DeviceType {
+  ANDROID
+  IOS
+  WEB
+  UNKNOWN
+}
+
+// =====================================================================
+// GROUP A - IDENTITY, ORGANIZATION & RBAC
+// =====================================================================
+
+model Organization {
+  id        String    @id @default(uuid())
+  name      String
+  code      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  users          User[]
+  departments    Department[]
+  vehicles       Vehicle[]
+  fuelPrices     FuelPrice[]
+  systemSettings SystemSetting[]
+
+  @@index([deletedAt])
+  @@map("organizations")
+}
+
+model Department {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("departments")
+}
+
+model User {
+  id             String @id @default(uuid())
+  organizationId String
+
+  // Auth
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(DRIVER)
+  isApproved   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+
+  // Profile
+  fullName  String
+  phone     String?
+  avatarUrl String?
+
+  // Driver-specific (nullable for non-drivers)
+  employeeId   String?   @unique
+  departmentId String?
+  homeAddress  String?
+  homeLat      Decimal?  @db.Decimal(10, 7)
+  homeLng      Decimal?  @db.Decimal(10, 7)
+  workSiteName String?
+  workSiteLat  Decimal?  @db.Decimal(10, 7)
+  workSiteLng  Decimal?  @db.Decimal(10, 7)
+  fuelType     FuelType?
+
+  // Stipend (current snapshot - full history in StipendHistory)
+  monthlyFuelStipendRwf Decimal @default(0) @db.Decimal(12, 2)
+  monthlyBudgetRwf      Decimal @default(400000) @db.Decimal(12, 2)
+
+  // Working pattern (used by fuel allocation engine)
+  workingDaysPerMonth Int @default(22)
+
+  // Driver profile setup — set once after first login
+  profileCompletedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  assignedVehicle Vehicle? @relation("VehicleAssignedDriver")
+
+  fuelTransactions      FuelTransaction[]     @relation("TxnDriver")
+  fuelRequestsSubmitted FuelRequest[]         @relation("RequestDriver")
+  fuelRequestActions    FuelRequestApproval[] @relation("RequestActor")
+  gpsTrips              GpsTrip[]             @relation("TripDriver")
+  alertsAsDriver        Alert[]               @relation("AlertDriver")
+  alertsResolved        Alert[]               @relation("AlertResolver")
+  notifications         Notification[]
+  notificationLogs      NotificationLog[]
+  deviceTokens          DeviceToken[]
+  sessions              Session[]
+  loginHistory          LoginHistory[]
+  otpCodes              OtpCode[]
+  auditLogsAsActor      AuditLog[]            @relation("AuditActor")
+  stipendChangesActor   StipendHistory[]      @relation("StipendChangedBy")
+  stipendChangesSubject StipendHistory[]      @relation("StipendSubject")
+  fuelPricesSet         FuelPrice[]           @relation("FuelPriceSetBy")
+  allocations           FuelAllocation[]      @relation("AllocationDriver")
+  allocationRecomputes  FuelAllocation[]      @relation("AllocationTriggeredBy")
+  approvedRoutes        ApprovedRoute[]       @relation("ApprovedRouteDriver")
+  approvedRoutesCreated ApprovedRoute[]       @relation("ApprovedRouteCreatedBy")
+  systemSettingsChanged SystemSetting[]       @relation("SettingChangedBy")
+  userPermissions       UserPermission[]      @relation("UserPermissions")
+  permissionsGranted    UserPermission[]      @relation("PermissionsGrantedBy")
+  permissionsRevoked    UserPermission[]      @relation("PermissionsRevokedBy")
+
+  @@index([organizationId, role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model UserPermission {
+  id         String         @id @default(uuid())
+  userId     String
+  permission PermissionType
+  grantedById String
+  grantedAt  DateTime       @default(now())
+  revokedAt  DateTime?
+  revokedById String?
+
+  user        User  @relation("UserPermissions", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy   User  @relation("PermissionsGrantedBy", fields: [grantedById], references: [id])
+  revokedBy   User? @relation("PermissionsRevokedBy", fields: [revokedById], references: [id])
+
+  @@unique([userId, permission])
+  @@index([userId])
+  @@map("user_permissions")
+}
+
+// =====================================================================
+// GROUP B - FLEET (VEHICLES)
+// =====================================================================
+
+model Vehicle {
+  id             String @id @default(uuid())
+  organizationId String
+
+  plateNumber   String      @unique
+  make          String
+  model         String
+  year          Int
+  vehicleType   VehicleType
+  fuelType      FuelType
+  tankCapacityL Decimal     @db.Decimal(8, 2)
+  currentFuelL  Decimal     @default(0) @db.Decimal(8, 2)
+  odometerKm    Decimal     @default(0) @db.Decimal(10, 2)
+
+  // Efficiency baseline used by the fuel allocation engine (km per liter)
+  fuelEfficiencyKmpl Decimal @default(10) @db.Decimal(6, 2)
+
+  status           VehicleStatus @default(UNASSIGNED)
+  assignedDriverId String?       @unique
+  color            String?
+  notes            String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignedDriver User?        @relation("VehicleAssignedDriver", fields: [assignedDriverId], references: [id], onDelete: SetNull)
+
+  fuelTransactions FuelTransaction[]
+  fuelRequests     FuelRequest[]
+  gpsTrips         GpsTrip[]
+  alerts           Alert[]
+  approvedRoutes   ApprovedRoute[]
+  allocations      FuelAllocation[]
+
+  @@index([organizationId, status])
+  @@index([deletedAt])
+  @@map("vehicles")
+}
+
+// =====================================================================
+// GROUP C - FUEL PRICES, SYSTEM SETTINGS & ALLOCATION ENGINE
+// =====================================================================
+
+model FuelPrice {
+  id             String @id @default(uuid())
+  organizationId String
+
+  fuelType      FuelType
+  priceRwf      Decimal  @db.Decimal(10, 2)
+  effectiveDate DateTime @db.Date
+  setById       String
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  setBy        User         @relation("FuelPriceSetBy", fields: [setById], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, fuelType, effectiveDate])
+  @@index([organizationId, fuelType, effectiveDate])
+  @@map("fuel_prices")
+}
+
+/// Global (organizationId = null) or per-organization configuration values,
+/// e.g. FUEL_BUFFER_PERCENT, DEFAULT_WORKING_DAYS, ROAD_DISTANCE_FACTOR, REQUIRE_LOGIN_OTP
+model SystemSetting {
+  id             String  @id @default(uuid())
+  organizationId String?
+
+  key         String
+  value       String
+  description String?
+
+  changedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  changedBy    User?         @relation("SettingChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, key])
+  @@index([key])
+  @@map("system_settings")
+}
+
+/// Full audit trail of stipend changes (spec section 1)
+model StipendHistory {
+  id String @id @default(uuid())
+
+  userId         String
+  previousAmount Decimal  @db.Decimal(12, 2)
+  newAmount      Decimal  @db.Decimal(12, 2)
+  changedById    String
+  reason         String?
+  changedAt      DateTime @default(now())
+
+  user      User @relation("StipendSubject", fields: [userId], references: [id], onDelete: Cascade)
+  changedBy User @relation("StipendChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([userId, changedAt])
+  @@map("stipend_history")
+}
+
+/// Append-only monthly fuel allocation snapshot per driver.
+/// Each recompute creates a new row; the latest row per (driverId, periodYear, periodMonth)
+/// is the "current" allocation. This preserves full recompute history.
+model FuelAllocation {
+  id String @id @default(uuid())
+
+  driverId  String
+  vehicleId String
+
+  periodYear  Int
+  periodMonth Int
+
+  // Inputs snapshot (for traceability of recompute)
+  distanceKm        Decimal @db.Decimal(8, 2)
+  workingDays       Int
+  vehicleEfficiency Decimal @db.Decimal(6, 2)
+  fuelPriceRwf      Decimal @db.Decimal(10, 2)
+  bufferPercent     Decimal @db.Decimal(5, 2)
+
+  // Computed outputs
+  baseRequirementL  Decimal @db.Decimal(8, 2)
+  bufferL           Decimal @db.Decimal(8, 2)
+  finalAllocationL  Decimal @db.Decimal(8, 2)
+  extraFuelGrantedL Decimal @default(0) @db.Decimal(8, 2)
+  totalAvailableL   Decimal @db.Decimal(8, 2)
+  projectedCostRwf  Decimal @db.Decimal(12, 2)
+
+  recomputeReason String
+  triggeredById   String?
+  createdAt       DateTime @default(now())
+
+  driver      User    @relation("AllocationDriver", fields: [driverId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  triggeredBy User?   @relation("AllocationTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@index([driverId, periodYear, periodMonth, createdAt])
+  @@map("fuel_allocations")
+}
+
+// =====================================================================
+// GROUP D - FUEL TRANSACTIONS & EXTRA FUEL REQUESTS
+// =====================================================================
+
+model FuelTransaction {
+  id String @id @default(uuid())
+
+  vehicleId String
+  driverId  String
+  stationId String?
+
+  transactionType TransactionType
+  quantityL       Decimal         @db.Decimal(8, 2)
+  unitPriceRwf    Decimal?        @db.Decimal(10, 2)
+  totalCostRwf    Decimal?        @db.Decimal(12, 2)
+
+  odometerKm       Decimal? @db.Decimal(10, 2)
+  fuelLevelBeforeL Decimal? @db.Decimal(8, 2)
+  fuelLevelAfterL  Decimal? @db.Decimal(8, 2)
+
+  receiptNumber String?
+  notes         String?
+  recordedAt    DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driver  User    @relation("TxnDriver", fields: [driverId], references: [id], onDelete: Restrict)
+
+  alerts Alert[]
+
+  @@index([vehicleId, recordedAt])
+  @@index([driverId, recordedAt])
+  @@map("fuel_transactions")
+}
+
+/// Extra fuel request with multi-stage approval workflow (spec section 4)
+model FuelRequest {
+  id String @id @default(uuid())
+
+  vehicleId String
+  driverId  String
+
+  requestedQuantityL Decimal  @db.Decimal(8, 2)
+  purpose            String?
+  unitPriceRwf       Decimal? @db.Decimal(10, 2)
+
+  // Origin / destination of the extra trip
+  originName             String?
+  originLat              Decimal? @db.Decimal(10, 7)
+  originLng              Decimal? @db.Decimal(10, 7)
+  destinationName        String?
+  destinationLat         Decimal? @db.Decimal(10, 7)
+  destinationLng         Decimal? @db.Decimal(10, 7)
+  expectedDistanceKm     Decimal? @db.Decimal(8, 2)
+  estimatedFuelRequiredL Decimal? @db.Decimal(8, 2)
+  supportingNotes        String?
+
+  status FuelRequestStatus @default(PENDING)
+
+  // Final decision summary (denormalized - full trail in FuelRequestApproval)
+  finalDecisionById String?
+  finalDecisionAt   DateTime?
+  rejectionReason   String?
+
+  // Liters actually granted once FINANCE_APPROVED (defaults to requestedQuantityL)
+  grantedQuantityL Decimal? @db.Decimal(8, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driver  User    @relation("RequestDriver", fields: [driverId], references: [id], onDelete: Cascade)
+
+  approvals FuelRequestApproval[]
+  alerts    Alert[]
+
+  @@index([driverId, status])
+  @@index([vehicleId, status])
+  @@index([status, createdAt])
+  @@map("fuel_requests")
+}
+
+/// Full transition trail for the extra fuel request workflow - one row per stage change
+model FuelRequestApproval {
+  id String @id @default(uuid())
+
+  fuelRequestId String
+  actorId       String
+  fromStatus    FuelRequestStatus
+  toStatus      FuelRequestStatus
+  comment       String?
+  actedAt       DateTime          @default(now())
+
+  fuelRequest FuelRequest @relation(fields: [fuelRequestId], references: [id], onDelete: Cascade)
+  actor       User        @relation("RequestActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([fuelRequestId, actedAt])
+  @@map("fuel_request_approvals")
+}
+
+// =====================================================================
+// GROUP E - GPS TRACKING, APPROVED ROUTES & DETOUR DETECTION
+// =====================================================================
+
+model GpsTrip {
+  id String @id @default(uuid())
+
+  vehicleId String
+  driverId  String
+
+  status TripStatus @default(PLANNED)
+
+  originName      String?
+  originLat       Decimal? @db.Decimal(10, 7)
+  originLng       Decimal? @db.Decimal(10, 7)
+  destinationName String?
+  destinationLat  Decimal? @db.Decimal(10, 7)
+  destinationLng  Decimal? @db.Decimal(10, 7)
+
+  distanceKm     Decimal? @db.Decimal(8, 2)
+  fuelConsumedL  Decimal? @db.Decimal(8, 2)
+  fuelEfficiency Decimal? @db.Decimal(6, 2)
+
+  // Detour / deviation detection vs the driver's approved commute route
+  approvedRouteId  String?
+  maxDeviationKm   Decimal? @db.Decimal(6, 2)
+  detourDistanceKm Decimal? @db.Decimal(8, 2)
+  isDetourFlagged  Boolean  @default(false)
+
+  startedAt       DateTime?
+  endedAt         DateTime?
+  durationMinutes Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle       Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driver        User           @relation("TripDriver", fields: [driverId], references: [id], onDelete: Cascade)
+  approvedRoute ApprovedRoute? @relation(fields: [approvedRouteId], references: [id], onDelete: SetNull)
+
+  waypoints TripWaypoint[]
+  alerts    Alert[]
+
+  @@index([driverId, startedAt])
+  @@index([vehicleId, startedAt])
+  @@index([approvedRouteId])
+  @@map("gps_trips")
+}
+
+model TripWaypoint {
+  id String @id @default(uuid())
+
+  tripId     String
+  sequenceNo Int
+
+  latitude   Decimal  @db.Decimal(10, 7)
+  longitude  Decimal  @db.Decimal(10, 7)
+  speedKmh   Decimal? @db.Decimal(6, 2)
+  fuelLevelL Decimal? @db.Decimal(8, 2)
+  recordedAt DateTime @default(now())
+
+  trip GpsTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, sequenceNo])
+  @@index([tripId, recordedAt])
+  @@map("trip_waypoints")
+}
+
+/// Defines the expected home<->work commute route for a driver (spec section 3)
+model ApprovedRoute {
+  id String @id @default(uuid())
+
+  driverId  String
+  vehicleId String
+
+  name            String  @default("Home-Work Commute")
+  totalDistanceKm Decimal @db.Decimal(8, 2)
+  toleranceKm     Decimal @default(2.0) @db.Decimal(6, 2)
+
+  isActive Boolean @default(true)
+
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  driver    User    @relation("ApprovedRouteDriver", fields: [driverId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("ApprovedRouteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  waypoints ApprovedRouteWaypoint[]
+  trips     GpsTrip[]
+
+  @@index([driverId, isActive])
+  @@index([deletedAt])
+  @@map("approved_routes")
+}
+
+model ApprovedRouteWaypoint {
+  id String @id @default(uuid())
+
+  approvedRouteId String
+  sequenceNo      Int
+  latitude        Decimal @db.Decimal(10, 7)
+  longitude       Decimal @db.Decimal(10, 7)
+  label           String?
+
+  approvedRoute ApprovedRoute @relation(fields: [approvedRouteId], references: [id], onDelete: Cascade)
+
+  @@unique([approvedRouteId, sequenceNo])
+  @@map("approved_route_waypoints")
+}
+
+// =====================================================================
+// GROUP F - ALERTS & AUDIT
+// =====================================================================
+
+model Alert {
+  id String @id @default(uuid())
+
+  vehicleId     String?
+  driverId      String?
+  tripId        String?
+  transactionId String?
+  fuelRequestId String?
+
+  alertType    AlertType
+  severity     AlertSeverity
+  status       AlertStatus   @default(OPEN)
+  title        String
+  description  String?
+  aiConfidence Decimal?      @db.Decimal(4, 3)
+
+  resolvedById String?
+  resolvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle     Vehicle?         @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  driver      User?            @relation("AlertDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  trip        GpsTrip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  transaction FuelTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  fuelRequest FuelRequest?     @relation(fields: [fuelRequestId], references: [id], onDelete: SetNull)
+  resolvedBy  User?            @relation("AlertResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId, status])
+  @@index([driverId, status])
+  @@index([status, severity, createdAt])
+  @@map("alerts")
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+
+  actorId     String?
+  action      AuditAction
+  entityType  String
+  entityId    String?
+  description String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+// =====================================================================
+// GROUP G - NOTIFICATIONS (IN-APP, PUSH, EMAIL)
+// =====================================================================
+
+model Notification {
+  id String @id @default(uuid())
+
+  userId String
+
+  title     String
+  message   String
+  type      String
+  category  NotificationCategory
+  priority  NotificationPriority @default(MEDIUM)
+  relatedId String?
+  dedupeKey String?
+
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+/// Device registration - doubles as FCM push token store and "known device" tracking
+model DeviceToken {
+  id String @id @default(uuid())
+
+  userId     String
+  deviceId   String
+  token      String?    @unique
+  deviceType DeviceType @default(UNKNOWN)
+  deviceName String?
+  lastUsedAt DateTime   @default(now())
+  isActive   Boolean    @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId, isActive])
+  @@index([deletedAt])
+  @@map("device_tokens")
+}
+
+/// Outbox pattern: every notification event creates one row per (recipient, channel)
+/// for EMAIL/PUSH, processed by a background worker with retries.
+model NotificationLog {
+  id String @id @default(uuid())
+
+  userId    String
+  channel   NotificationChannel
+  eventType String
+  payload   Json
+  status    NotificationDeliveryStatus @default(PENDING)
+
+  attempts              Int       @default(0)
+  lastError             String?
+  sentAt                DateTime?
+  relatedNotificationId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, channel, createdAt])
+  @@index([userId, eventType, createdAt])
+  @@map("notification_logs")
+}
+
+// =====================================================================
+// GROUP H - AUTH: SESSIONS, OTP, DEVICES, LOGIN HISTORY, RATE LIMITING
+// =====================================================================
+
+model Session {
+  id String @id @default(uuid())
+
+  userId       String
+  refreshToken String  @unique
+  deviceId     String?
+  ipAddress    String?
+  userAgent    String?
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id String @id @default(uuid())
+
+  userId String
+
+  codeHash String
+  purpose  OtpPurpose
+  status   OtpStatus  @default(PENDING)
+
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+  verifiedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, status])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+model LoginHistory {
+  id String @id @default(uuid())
+
+  userId        String
+  success       Boolean
+  ipAddress     String?
+  userAgent     String?
+  deviceId      String?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("login_history")
+}
+
+/// Postgres-backed rate limiting fallback (account lockout tracking).
+/// In production, pair with an in-memory/Redis store for route-level limits.
+model RateLimitEntry {
+  id String @id @default(uuid())
+
+  key         String   @unique
+  count       Int      @default(1)
+  windowStart DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+  @@map("rate_limit_entries")
+}
