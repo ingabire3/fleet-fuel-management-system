@@ -14,8 +14,8 @@ I built a full-stack fleet fuel management system end-to-end — backend, mobile
 
 **The outcome:** a fleet manager can see, in one dashboard, whether a driver's fuel consumption matches their actual GPS-logged trips — and get flagged automatically when it doesn't.
 
-🔗 Live demo: <demo-link>
-💻 Code: <github-link>
-📄 API docs: <api-docs-link>
+🔗 Live demo: https://fleet-fuel-management-system.vercel.app
+💻 Code: https://github.com/ingabire3/fleet-fuel-management-system
+📄 API docs: https://fuel-fleet-backend.onrender.com/api-docs
 
 #FlutterDev #NodeJS #FullStackDevelopment #SoftwareEngineering #FleetManagement

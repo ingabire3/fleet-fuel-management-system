@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../utils/constants.dart';
+
+const _githubUrl = 'https://github.com/ingabire3/fleet-fuel-management-system';
+
+Future<void> _openGithub() => launchUrl(Uri.parse(_githubUrl), webOnlyWindowName: '_blank');
 
 /// Web-only marketing/landing page shown before login. Gives recruiters
 /// context (features, stack, architecture, demo creds) without needing
@@ -99,7 +104,7 @@ class _Hero extends StatelessWidget {
                 child: const Text('Launch Live Demo'),
               ),
               OutlinedButton(
-                onPressed: () {},
+                onPressed: _openGithub,
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Colors.white),
                   foregroundColor: AppConstants.white,

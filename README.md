@@ -2,7 +2,7 @@
 
 Smart fleet management system with GPS tracking, dynamic fuel calculation, PDF reports, push notifications, OTP authentication, an analytics dashboard, and role-based access — built for a real fleet operation in Kigali, Rwanda.
 
-**Live demo:** `<your-vercel-url>` &nbsp;|&nbsp; **API docs:** `<your-render-url>/api-docs`
+**Live demo:** https://fleet-fuel-management-system.vercel.app &nbsp;|&nbsp; **API docs:** https://fuel-fleet-backend.onrender.com/api-docs
 
 > Demo server may take 30–60 seconds on first load due to free-tier hosting (Render spins down idle services).
 
